@@ -4,16 +4,16 @@ import { products } from '../data/products';
 
 const Carousel3D = () => {
   const [activeIndex, setActiveIndex] = useState(0); 
-  const [isAutoPlaying, setIsAutoPlaying] = useState(true); // Empieza activo
+  const [isAutoPlaying, setIsAutoPlaying] = useState(true);
   
-  // Estados para el arrastre fluido
+  // Estados para el arrastre
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
+  const [startY, setStartY] = useState(0); // Nuevo: Para detectar scroll vertical
   const [currentDragX, setCurrentDragX] = useState(0);
 
   const containerRef = useRef(null);
 
-  // Funciones de navegación
   const handleNext = useCallback(() => {
     setActiveIndex((prev) => (prev + 1) % products.length);
   }, []);
@@ -22,43 +22,67 @@ const Carousel3D = () => {
     setActiveIndex((prev) => (prev - 1 + products.length) % products.length);
   }, []);
 
-  // --- AUTOPLAY INTELIGENTE ---
+  // Autoplay
   useEffect(() => {
-    // Si estamos arrastrando o el autoplay está apagado manualmente, no hacemos nada
     if (!isAutoPlaying || isDragging) return;
-
-    // Configurar el intervalo
     const interval = setInterval(handleNext, 4000);
-
-    // Limpiar el intervalo al desmontar o cuando cambien las dependencias
     return () => clearInterval(interval);
-    
-    // IMPORTANTE: Agregamos 'activeIndex' a las dependencias.
-    // Esto hace que cada vez que la tarjeta cambie (sea por el usuario o automática),
-    // el contador de 4 segundos se reinicie desde cero.
   }, [isAutoPlaying, isDragging, handleNext, activeIndex]);
 
-
-  // --- Lógica de Arrastre Fluido (Pointer Events) ---
+  // --- Lógica de Arrastre Inteligente (Touch Friendly) ---
   
   const handlePointerDown = (e) => {
-    setIsAutoPlaying(false); // Pausamos MIENTRAS tocas para que no se mueva solo
-    setIsDragging(true);
+    // NO capturamos el puntero inmediatamente ni pausamos el autoplay todavía.
+    // Solo guardamos dónde empezó el dedo.
+    setIsDragging(false);
     setStartX(e.clientX);
+    setStartY(e.clientY);
     setCurrentDragX(0);
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e) => {
-    if (!isDragging) return;
-    const x = e.clientX - startX;
-    setCurrentDragX(x);
+    // Si ya estamos arrastrando (confirmado), movemos el carrusel
+    if (isDragging) {
+      // Prevenir el scroll por si acaso el navegador intenta intervenir tarde
+      if (e.cancelable) e.preventDefault(); 
+      const x = e.clientX - startX;
+      setCurrentDragX(x);
+      return;
+    }
+
+    // Si NO estamos arrastrando aún, verificamos la intención del usuario
+    // Solo si el botón del mouse está presionado o hay un dedo en pantalla
+    if (e.buttons > 0 || e.pointerType === 'touch') {
+      const xDiff = Math.abs(e.clientX - startX);
+      const yDiff = Math.abs(e.clientY - startY);
+
+      // Umbral mínimo para decidir (5px)
+      if (xDiff > 5 || yDiff > 5) {
+        // Si se mueve más en HORIZONTAL que en VERTICAL -> Es un Swipe de Carrusel
+        if (xDiff > yDiff) {
+          setIsDragging(true);
+          setIsAutoPlaying(false); // Ahora sí pausamos
+          e.currentTarget.setPointerCapture(e.pointerId); // Capturamos el evento
+          const x = e.clientX - startX;
+          setCurrentDragX(x);
+        } 
+        // Si se mueve más en VERTICAL -> Es Scroll de página
+        else {
+          // No hacemos nada, dejamos que el navegador haga scroll nativo
+        }
+      }
+    }
   };
 
   const handlePointerUp = (e) => {
+    // Liberar captura siempre
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
     if (!isDragging) return;
+
     setIsDragging(false);
-    e.currentTarget.releasePointerCapture(e.pointerId);
 
     const threshold = 100;
     
@@ -69,9 +93,6 @@ const Carousel3D = () => {
     }
     
     setCurrentDragX(0);
-    
-    // --- MAGIA AQUÍ ---
-    // Al soltar, reactivamos el autoplay inmediatamente.
     setIsAutoPlaying(true); 
   };
   
@@ -120,38 +141,33 @@ const Carousel3D = () => {
     <div 
       className="relative w-full max-w-[1000px] mx-auto h-[450px] flex items-center justify-center mt-8 perspective-1000"
     >
-      {/* Botones Manuales */}
       <button 
-        onClick={() => {
-          handlePrev();
-          setIsAutoPlaying(true); // Aseguramos que siga automático tras el click
-        }}
+        onClick={() => { handlePrev(); setIsAutoPlaying(true); }}
         className="hidden md:block absolute left-4 md:left-10 z-50 p-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-[#FF8C73] hover:border-[#FF8C73] hover:scale-110 transition-all duration-300 shadow-lg"
       >
         <ChevronLeft size={24} />
       </button>
       
       <button 
-        onClick={() => {
-          handleNext();
-          setIsAutoPlaying(true); // Aseguramos que siga automático tras el click
-        }}
+        onClick={() => { handleNext(); setIsAutoPlaying(true); }}
         className="hidden md:block absolute right-4 md:right-10 z-50 p-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-[#FF8C73] hover:border-[#FF8C73] hover:scale-110 transition-all duration-300 shadow-lg"
       >
         <ChevronRight size={24} />
       </button>
 
-      {/* Área Táctil */}
+      {/* Área Táctil:
+         - touch-pan-y: PERMITE scroll vertical nativo del navegador.
+         - touch-none: (ELIMINADO) Ya no bloqueamos todo.
+      */}
       <div 
         ref={containerRef}
-        className="absolute inset-0 z-40 touch-none"
+        className="absolute inset-0 z-40 touch-pan-y" 
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
       />
 
-      {/* Tarjetas */}
       <div className="relative w-full h-full flex items-center justify-center pointer-events-none"> 
         {products.map((item, index) => {
           const styles = getStyles(index);
@@ -170,7 +186,7 @@ const Carousel3D = () => {
               onClick={() => {
                 if (!isDragging && distance !== 0) {
                   setActiveIndex(index);
-                  setIsAutoPlaying(true); // Si haces click en una lateral, también sigue automático
+                  setIsAutoPlaying(true);
                 }
               }}
             >
